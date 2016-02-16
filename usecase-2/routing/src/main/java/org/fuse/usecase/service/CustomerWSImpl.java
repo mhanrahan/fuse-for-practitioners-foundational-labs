@@ -41,6 +41,11 @@ public class CustomerWSImpl implements CustomerWS {
     public CorporateAccount updateAccount(Account account) {
         CorporateAccount ca = new CorporateAccount();
 
+        ca.setCompany(account.getCompany());
+        ca.setContact(account.getContact());
+
+        ca.setId(genRandom());
+        ca.setSalesContact(getRandomSales(sales));
 
         return ca;
     }

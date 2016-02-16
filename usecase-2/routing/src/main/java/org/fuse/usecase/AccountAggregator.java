@@ -20,11 +20,25 @@ public class AccountAggregator implements AggregationStrategy {
     public Exchange aggregate(Exchange oldExchange, Exchange newExchange) {
 
         if (oldExchange == null) {
-
             return newExchange;
         }
 
-        return oldExchange;
+        Account account = oldExchange.getIn().getBody(Account.class);
+        CorporateAccount corporateAccount = newExchange.getIn().getBody(CorporateAccount.class);
+        if (account == null || corporateAccount == null) {
+            System.out.println("Account null");
+            return newExchange;
+        }
+
+        if (corporateAccount == null) {
+            System.out.println("CorporateAccount null");
+            return newExchange;
+        }
+
+        account.setClientId(corporateAccount.getId());
+        account.setSalesRepresentative(corporateAccount.getSalesContact());
+        newExchange.getIn().setBody(account);
+        return newExchange;
     }
     
 }

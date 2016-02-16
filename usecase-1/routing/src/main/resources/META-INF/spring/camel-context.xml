@@ -9,5 +9,40 @@
 
     <camelContext trace="false" xmlns="http://camel.apache.org/schema/spring">
         <propertyPlaceholder id="properties" location="fabric8/route.properties"/>
+
+        <endpoint
+                uri="dozer:csv2json?sourceModel=org.acme.Customer&amp;targetModel=org.globex.Account&amp;marshalId=json&amp;unmarshalId=csv&amp;mappingFile=transformation.xml"
+                id="csv2json" />
+
+        <dataFormats>
+            <bindy type="Csv" id="csv" classType="org.acme.Customer" />
+            <json id="json" library="Jackson" />
+        </dataFormats>
+
+        <onException>
+          <exception>java.lang.IllegalArgumentException</exception>
+            <handled>
+                <constant>${true}</constant>
+            </handled>
+            <log message="Error handled!" />
+          <to uri="file:src/data/error?fileName=account-${property.CamelSplitIndex}.json" />
+        </onException>
+
+        <route id="main-route">
+          <from uri="file:src/data/inbox?fileName=customers.csv&amp;noop=true"/>
+          <split>
+            <tokenize token="\n" />
+            <to ref="csv2json" />
+              <log message="Success!" />
+            <to uri="file:src/data/outbox?fileName=account-${property.CamelSplitIndex}.json" />
+          </split>
+        </route>
+
+        <route id="mockTestEndpoint">
+            <from uri="direct:csv2json-test-input"/>
+            <to ref="csv2json" />
+            <to uri="mock:csv2json-test-output" />
+        </route>
+
     </camelContext>
 </beans>

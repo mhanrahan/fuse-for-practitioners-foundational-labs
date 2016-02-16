@@ -13,26 +13,146 @@
     <!-- H2 Datasource -->
     <bean id="usecaseDB" class="org.springframework.jdbc.datasource.DriverManagerDataSource">
         <property name="driverClassName" value="org.h2.Driver"/>
-        <property name="url" value="jdbc:h2:tcp://localhost/~/usecaseDB"/>
+        <property name="url" value="jdbc:h2:tcp://localhost/~/useCaseDB"/>
         <property name="username" value="sa"/>
         <property name="password" value=""/>
     </bean>
 
     <!-- SQL Component -->
     <bean id="sql" class="org.apache.camel.component.sql.SqlComponent">
-
+      <property name="dataSource" ref="usecaseDB" />
     </bean>
 
-    <cxf:cxfEndpoint id="customerWebService">
+    <cxf:cxfEndpoint id="customerWebService"
+                     serviceClass="org.fuse.usecase.service.CustomerWSImpl"
+                     loggingFeatureEnabled="true"
+                     address="http://localhost:9090/ws/customerService">
+
     </cxf:cxfEndpoint>
 
-    <cxf:rsServer id="customerRestService">
+    <bean id="jsonProvider" class="com.fasterxml.jackson.jaxrs.json.JacksonJaxbJsonProvider" />
+    <bean id="accountAggregator" class="org.fuse.usecase.AccountAggregator" />
+    <bean id="processorBean" class="org.fuse.usecase.ProcessorBean" />
+
+
+    <bean id="customerRestImpl" class="org.fuse.usecase.service.CustomerRestImpl" />
+    <bean id="customerWSImpl" class="org.fuse.usecase.service.CustomerWSImpl" />
+
+    <cxf:rsServer
+            id="customerRestService"
+            address="http://localhost:9191/rest"
+            serviceClass="org.fuse.usecase.service.CustomerRestImpl"
+            loggingFeatureEnabled="true">
+        <cxf:providers>
+            <ref bean="jsonProvider"/>
+        </cxf:providers>
     </cxf:rsServer>
 
-    <cxf:rsClient id="customerRestServiceClient">
+    <cxf:rsClient id="customerRestServiceClient"
+                  address="http://localhost:9191/rest"
+                  serviceClass="org.fuse.usecase.service.CustomerRest"
+                  loggingFeatureEnabled="true">
+        <cxf:providers>
+            <ref bean="jsonProvider"/>
+        </cxf:providers>
     </cxf:rsClient>
 
     <camelContext trace="false" xmlns="http://camel.apache.org/schema/spring">
         <propertyPlaceholder id="properties" location="fabric8/route.properties"/>
+
+        <dataFormats>
+            <json id="jacksonJson" library="Jackson" unmarshalTypeName="org.globex.Account" />
+        </dataFormats>
+
+        <route id="mainRoute">
+          <from uri="file:src/data/inbox?noop=true" />
+          <convertBodyTo type="java.lang.String" />
+          <unmarshal ref="jacksonJson" />
+          <multicast strategyRef="accountAggregator">
+            <to uri="direct:callRestEndpoint" />
+            <to uri="direct:callWSEndpoint" />
+          </multicast>
+          <log message="post multipass" />
+          <to uri="direct:saveToDb" />
+        </route>
+
+      <!--Client side preparation-->
+        <route id="restRequest" >
+          <from uri="direct:callRestEndpoint" />
+          <setHeader headerName="CamelCxfRsUsingHttpAPI">
+            <constant>true</constant>
+          </setHeader>
+          <setHeader headerName="CamelHTTPMethod">
+            <constant>POST</constant>
+          </setHeader>
+          <setHeader headerName="CamelHTTPPath">
+            <constant>/customerservice/enrich</constant>
+          </setHeader>
+          <setHeader headerName="Accept">
+            <constant>application/json</constant>
+          </setHeader>
+          <setHeader headerName="Content-Type">
+            <constant>application/json</constant>
+          </setHeader>
+          <inOut uri="cxfrs:bean:customerRestServiceClient" />
+          <unmarshal ref="jacksonJson" />
+        </route>
+
+        <route id="webRequest" >
+            <from uri="direct:callWSEndpoint" />
+            <inOut uri="cxf:http://localhost:9090/ws/customerService?serviceClass=org.fuse.usecase.service.CustomerWS" />
+        </route>
+      <!--Client side Preparation ends-->
+
+<!-- Service Side processing -->
+      <route id="restServiceRequest">
+        <from uri="cxfrs:bean:customerRestService" />
+        <to uri="bean:customerRestImpl?method=enrich(*)" />
+      </route>
+
+      <route id="webServiceRequest">
+        <from uri="cxf:bean:customerWebService" />
+        <to uri="bean:customerWSImpl?method=updateAccount(*)" />
+      </route>
+
+      <!--Service Side Processing Ends-->
+
+      <route id="persistInDb" >
+        <from uri="direct:saveToDb" />
+        <bean ref="processorBean" method="defineNamedParameters" />
+
+        <log message="SAVING TO DB OR SOMETHING: ${body}" />
+        <to uri="sql:INSERT INTO USECASE.T_ACCOUNT (
+                  CLIENT_ID,
+                  SALES_CONTACT,
+                  COMPANY_NAME,
+                  COMPANY_GEO,
+                  COMPANY_ACTIVE,
+                  CONTACT_FIRST_NAME,
+                  CONTACT_LAST_NAME,
+                  CONTACT_ADDRESS,
+                  CONTACT_CITY,
+                  CONTACT_STATE,
+                  CONTACT_ZIP,
+                  CONTACT_PHONE,
+                  CREATION_DATE,
+                  CREATION_USER
+                  ) VALUES (
+                  :#CLIENT_ID,
+                  :#SALES_CONTACT,
+                  :#COMPANY_NAME,
+                  :#COMPANY_GEO,
+                  :#COMPANY_ACTIVE,
+                  :#CONTACT_FIRST_NAME,
+                  :#CONTACT_LAST_NAME,
+                  :#CONTACT_ADDRESS,
+                  :#CONTACT_CITY,
+                  :#CONTACT_STATE,
+                  :#CONTACT_ZIP,
+                  :#CONTACT_PHONE,
+                  :#CREATION_DATE,
+                  :#CREATION_USER);" />
+      </route>
+
     </camelContext>
 </beans>
